@@ -5,17 +5,24 @@ import (
     "github.com/gomodule/redigo/redis"
     "net"
     "encoding/json"
-
+    "chatroom/common"
 )
 
+// message id counter
+var msg_id_ctr = 0
 
 // database
 var pool = newPool()
 
 func main() {
 
-    // client := pool.Get()
-    // defer client.Close()
+    client := pool.Get()
+    defer client.Close()
+
+    _, err := client.Do("DEL", "messages")
+    if err != nil {
+        panic(err)
+    }
 
     // _, err := client.Do("SET", "mykey", "Hello from redigo!")
     // if err != nil {
@@ -61,7 +68,7 @@ func main() {
         fmt.Printf("Read a message from %v %s \n", remoteaddr, p)
 
         fmt.Printf("--- \n")
-        msg, username := parse_request_from_client(n, p)
+        msg, username, function := parse_request_from_client(n, p)
         fmt.Printf("msg = [%v]\n", msg)
         fmt.Printf("username = [%v]\n", username)
         fmt.Printf("--- \n")
@@ -70,7 +77,44 @@ func main() {
             fmt.Printf("Some error  %v", err)
             continue
         }
-        go sendResponse(ser, remoteaddr)
+
+        if function == "send_msg" {
+
+            message := common.DbMessage{
+                Id: msg_id_ctr,
+                Sender: username,
+                Msg: msg,
+            }
+            msg_id_ctr++
+
+            marshalled_msg, err := json.Marshal(message) 
+            if err != nil {
+                fmt.Println("Failed to marshall a message before writing to database")
+                fmt.Println(err)
+            }
+
+            _, err = client.Do("RPUSH", "messages", marshalled_msg)
+            if err != nil {
+                panic(err)
+            }
+
+            go sendResponse(ser, remoteaddr)
+        } else if function == "get_updates" {
+            messages, _ := redis.ByteSlices(client.Do("LRANGE", "messages", 0, -1))
+
+            var db_messages common.BulkDbMessage
+            for _, v := range messages {
+                var m common.DbMessage
+                err := json.Unmarshal(v, &m)
+                if err != nil {
+                    fmt.Println(err)
+                }
+                db_messages.DbMsgList = append(db_messages.DbMsgList, m)
+            }
+
+            data := common.MarshallBulkDbMessage(&db_messages)
+            go broadcastNessages(ser, remoteaddr, data)
+        }
     }
 }
 
@@ -98,15 +142,28 @@ func sendResponse(conn *net.UDPConn, addr *net.UDPAddr) {
     }
 }
 
-func parse_request_from_client(n int, request []byte) (msg, username string) {
+func broadcastNessages(conn *net.UDPConn, addr *net.UDPAddr, buf []byte) {
+    _,err := conn.WriteToUDP(buf, addr)
+    if err != nil {
+        fmt.Printf("Couldn't send response %v", err)
+    }
+}
+
+func parse_request_from_client(n int, request []byte) (msg, username, function string) {
     var m map[string]string
     err := json.Unmarshal([]byte(request[:n]), &m)
     if err != nil {
         fmt.Println(err)
     }
-    
-    msg = m["msg"]
+
+    if m["function"] == "send_msg" {
+        msg = m["msg"]
+    } else if m["function"] == "get_updates" {
+        msg = ""
+    }
+
     username = m["username"]
+    function = m["function"]
 
     return
 }
