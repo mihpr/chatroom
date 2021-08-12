@@ -16,6 +16,9 @@ var pool = newPool()
 
 func main() {
 
+    fmt.Println("Chat server")
+    fmt.Println("---------------------")
+
     client := pool.Get()
     defer client.Close()
 
