@@ -8,6 +8,8 @@ import (
     "chatroom/common"
 )
 
+const MSG_HISTORY_LEN = 5
+
 // message id counter
 var msg_id_ctr = 0
 
@@ -66,31 +68,30 @@ func main() {
         fmt.Printf("Some error %v\n", err)
         return
     }
+
     for {
         n,remoteaddr,err := ser.ReadFromUDP(p)
-        fmt.Printf("Read a message from %v %s \n", remoteaddr, p)
 
-        fmt.Printf("--- \n")
-        msg, username, function := parse_request_from_client(n, p)
-        fmt.Printf("msg = [%v]\n", msg)
-        fmt.Printf("username = [%v]\n", username)
-        fmt.Printf("--- \n")
-
-        if err !=  nil {
-            fmt.Printf("Some error  %v", err)
-            continue
+        if err != nil {
+            fmt.Println(err)
         }
+        // fmt.Printf("Read a message from %v %s \n", remoteaddr, p)
 
-        if function == "send_msg" {
+        function, b := common.ParseRequest(p[:n])
 
-            message := common.DbMessage{
-                Id: msg_id_ctr,
-                Sender: username,
-                Msg: msg,
+        switch function {
+        case common.F_SEND_MESSAGE:
+            data := common.ParseSendMessageRequest(b)
+            // fmt.Printf("data.Sender = %v\n", data.Sender)
+            // fmt.Printf("data.Text = %v\n", data.Text)
+            db_message := common.DbMessage{
+                MsgId: msg_id_ctr,
+                Sender: data.Sender,
+                Text: data.Text,
             }
             msg_id_ctr++
 
-            marshalled_msg, err := json.Marshal(message) 
+            marshalled_msg, err := json.Marshal(db_message) 
             if err != nil {
                 fmt.Println("Failed to marshall a message before writing to database")
                 fmt.Println(err)
@@ -101,22 +102,36 @@ func main() {
                 panic(err)
             }
 
-            go sendResponse(ser, remoteaddr)
-        } else if function == "get_updates" {
+            // Limit history capacity
+            _, err = client.Do("LTRIM", "messages", -MSG_HISTORY_LEN, -1)
+            if err != nil {
+                panic(err)
+            }
+
+            resp := common.BuildSendMessageResponse(true)
+
+            go sendResponse(ser, remoteaddr, resp)
+        case common.F_GET_UPDATES:
+
             messages, _ := redis.ByteSlices(client.Do("LRANGE", "messages", 0, -1))
 
-            var db_messages common.BulkDbMessage
+            var resp_data common.GetUpdatesResponse
             for _, v := range messages {
                 var m common.DbMessage
                 err := json.Unmarshal(v, &m)
                 if err != nil {
                     fmt.Println(err)
                 }
-                db_messages.DbMsgList = append(db_messages.DbMsgList, m)
+                resp_data = append(resp_data, m)
             }
 
-            data := common.MarshallBulkDbMessage(&db_messages)
-            go broadcastNessages(ser, remoteaddr, data)
+            // data := common.MarshallBulkDbMessage(&db_messages)
+
+            resp := common.BuildGetUpdatesResponse(resp_data)
+            go sendResponse(ser, remoteaddr, resp)
+
+        default:
+            fmt.Printf("Error, this should not happen\n")
         }
     }
 }
@@ -137,54 +152,11 @@ func newPool() *redis.Pool {
     }
 }
 
-// udp server
-func sendResponse(conn *net.UDPConn, addr *net.UDPAddr) {
-    _,err := conn.WriteToUDP([]byte("From server: Hello I got your message "), addr)
-    if err != nil {
-        fmt.Printf("Couldn't send response %v", err)
-    }
-}
-
-func broadcastNessages(conn *net.UDPConn, addr *net.UDPAddr, buf []byte) {
+// server
+func sendResponse(conn *net.UDPConn, addr *net.UDPAddr, buf []byte) {
+    // _,err := conn.WriteToUDP([]byte("From server: Hello I got your message "), addr)
     _,err := conn.WriteToUDP(buf, addr)
     if err != nil {
         fmt.Printf("Couldn't send response %v", err)
     }
-}
-
-func parse_request_from_client(n int, request []byte) (msg, username, function string) {
-    var m map[string]string
-    err := json.Unmarshal([]byte(request[:n]), &m)
-    if err != nil {
-        fmt.Println(err)
-    }
-
-    if m["function"] == "send_msg" {
-        msg = m["msg"]
-    } else if m["function"] == "get_updates" {
-        msg = ""
-    }
-
-    username = m["username"]
-    function = m["function"]
-
-    return
-}
-
-func build_response_to_client(username, msg string) (data []byte) {
-    response := make(map[string]string)
-    response["username"] = username
-    response["msg"] = msg
-
-    // var obj interface{}
-    data, err := json.Marshal(response) 
-    if err != nil {
-        fmt.Println("Failed to marshall the response")
-        fmt.Println(err)
-    }
-    // else {
-    //     fmt.Println("Request was marshalled")
-    //     fmt.Println(string(data))
-    // }
-    return
 }
