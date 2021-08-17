@@ -4,7 +4,7 @@ import (
     "fmt"
     "github.com/gomodule/redigo/redis"
     "net"
-    "encoding/json"
+    // "encoding/json"
     "chatroom/common"
 )
 
@@ -21,34 +21,6 @@ func main() {
     client := pool.Get()
     defer client.Close()
     db_clenup(client)
-
-    // _, err := client.Do("SET", "mykey", "Hello from redigo!")
-    // if err != nil {
-    //     panic(err)
-    // }
-
-    // value, err := client.Do("GET", "mykey")
-    // if err != nil {
-    //     panic(err)
-    // }
-
-    // fmt.Printf("%s \n", value)
-
-    // _, err = client.Do("ZADD", "vehicles", 4, "car")
-    // if err != nil {
-    //     panic(err)
-    // }
-    // _, err = client.Do("ZADD", "vehicles", 2, "bike")
-    // if err != nil {
-    //     panic(err)
-    // }
-
-    // vehicles, err := client.Do("ZRANGE", "vehicles", 0, -1, "WITHSCORES")
-    // if err != nil {
-    //     panic(err)
-    // }  
-    // fmt.Printf("%s \n", vehicles)
-
 
     // UDP server
     p := make([]byte, 2048)
@@ -75,28 +47,28 @@ func main() {
         switch function {
         case common.F_SEND_MESSAGE:
             data := common.ParseSendMessageRequest(b)
-            // fmt.Printf("data.Sender = %v\n", data.Sender)
-            // fmt.Printf("data.Text = %v\n", data.Text)
-            message := common.Message{
-                MsgId: get_next_msg_id(client),
-                Sender: data.Sender,
-                Text: data.Text,
-            }
 
-            marshalled_msg, err := json.Marshal(message) 
-            if err != nil {
-                fmt.Println("Failed to marshall a message before writing to database")
-                fmt.Println(err)
-            }
+            msg_id := get_next_msg_id(client)
 
             // Add message IDs and message data
-            _, err = client.Do("RPUSH", "msg_ids", message.MsgId)
+            _, err = client.Do("RPUSH", "msg_ids", msg_id)
             if err != nil {
                 panic(err)
             }
 
-            hash_key := get_hash_key_by_msg_id(message.MsgId)
-            _, err = client.Do("HSET", hash_key, "data", marshalled_msg) // TODO: replace marshalling by HMSETing the data items separately (?)
+            hash_key := get_hash_key_by_msg_id(msg_id)
+
+            _, err = client.Do("HSET", hash_key, "MsgId", msg_id)
+            if err != nil {
+                panic(err)
+            }
+
+            _, err = client.Do("HSET", hash_key, "Sender", data.Sender)
+            if err != nil {
+                panic(err)
+            }
+
+            _, err = client.Do("HSET", hash_key, "Text", data.Text)
             if err != nil {
                 panic(err)
             }
@@ -132,20 +104,26 @@ func main() {
 
             var resp_data common.GetUpdatesResponse
             for _, msg_id := range(int64s) {
-                // fmt.Printf("msg_id = [%d]\n", msg_id)
-                // fmt.Printf("msg_id format [%T]\n", msg_id)
-                hash_key := fmt.Sprintf("msg_data:%d", msg_id)
-                marshalled_msg, err := redis.Bytes(client.Do("HGET", hash_key, "data"))
+                hash_key := get_hash_key_by_msg_id(msg_id)
+                MsgId, err := redis.Int64(client.Do("HGET", hash_key, "MsgId"))
                 if err != nil {
                     panic(err)
                 }
-
-                var m common.Message
-                err = json.Unmarshal(marshalled_msg, &m)
+                Sender, err := redis.String(client.Do("HGET", hash_key, "Sender"))
                 if err != nil {
-                    fmt.Println(err)
+                    panic(err)
                 }
-                resp_data = append(resp_data, m)
+                Text, err := redis.String(client.Do("HGET", hash_key, "Text"))
+                if err != nil {
+                    panic(err)
+                }
+                message := common.MessageData {
+                    MsgId: MsgId,
+                    Sender: Sender,
+                    Text: Text,
+                }
+
+                resp_data = append(resp_data, message)
             }
 
             resp := common.BuildGetUpdatesResponse(resp_data)
@@ -225,7 +203,6 @@ func db_clenup(client redis.Conn) {
         if err != nil {
             panic(err)
         }
-        // fmt.Printf("deleting key = [%s]\n", key)
     }
 
 

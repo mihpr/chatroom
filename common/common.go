@@ -18,7 +18,7 @@ const F_SEND_MESSAGE = "send_msg"
 const F_GET_UPDATES  = "get_updates"
 const F_DEL_MESSAGE  = "del_msg"
 
-type Message struct {
+type MessageData struct {
     MsgId int64
     Sender string
     Text string
@@ -147,7 +147,7 @@ func ParseSendMessageResponse(b []byte) (data SendMessageResponse) {
 type GetUpdatesRequest struct {
 }
 
-type GetUpdatesResponse []Message
+type GetUpdatesResponse []MessageData
 
 func BuildGetUpdatesRequest() (b []byte) {
     b, err := json.Marshal(nil)
@@ -162,7 +162,7 @@ func BuildGetUpdatesRequest() (b []byte) {
 
 // func ParseGetUpdatesRequest() is not required
 
-func BuildGetUpdatesResponse(dbMsgList []Message) (b []byte) {
+func BuildGetUpdatesResponse(dbMsgList []MessageData) (b []byte) {
     // data := dbMsgList
     b, err := json.Marshal(dbMsgList)
     if err != nil {
