@@ -11,6 +11,7 @@ import (
 const MSG_HISTORY_LEN = 5
 
 // message id counter
+// TODO: use redis key instead of the global variable
 var msg_id_ctr = 0
 
 // database
@@ -25,6 +26,11 @@ func main() {
     defer client.Close()
 
     _, err := client.Do("DEL", "messages")
+    if err != nil {
+        panic(err)
+    }
+
+    _, err = client.Do("SET", "msgid_counter", 0)
     if err != nil {
         panic(err)
     }
@@ -84,12 +90,11 @@ func main() {
             data := common.ParseSendMessageRequest(b)
             // fmt.Printf("data.Sender = %v\n", data.Sender)
             // fmt.Printf("data.Text = %v\n", data.Text)
-            db_message := common.DbMessage{
-                MsgId: msg_id_ctr,
+            db_message := common.Message{
+                MsgId: get_next_msg_id(client),
                 Sender: data.Sender,
                 Text: data.Text,
             }
-            msg_id_ctr++
 
             marshalled_msg, err := json.Marshal(db_message) 
             if err != nil {
@@ -117,7 +122,7 @@ func main() {
 
             var resp_data common.GetUpdatesResponse
             for _, v := range messages {
-                var m common.DbMessage
+                var m common.Message
                 err := json.Unmarshal(v, &m)
                 if err != nil {
                     fmt.Println(err)
@@ -125,10 +130,37 @@ func main() {
                 resp_data = append(resp_data, m)
             }
 
-            // data := common.MarshallBulkDbMessage(&db_messages)
-
             resp := common.BuildGetUpdatesResponse(resp_data)
             go sendResponse(ser, remoteaddr, resp)
+
+        // case common.F_DEL_MESSAGE:
+            // req_data := common.ParseDeleteMessageRequest(b)
+
+
+            // messages, _ := redis.ByteSlices(client.Do("LRANGE", "messages", 0, -1))
+
+            // // var resp_data common.GetUpdatesResponse
+            // for idx, v := range messages {
+            //     var m common.Message
+            //     err := json.Unmarshal(v, &m)
+            //     if err != nil {
+            //         fmt.Println(err)
+            //     }
+            //     // resp_data = append(resp_data, m)
+            //     if m.MsgId == req_data.MsgId {
+            //         if m.Sender == req_data.Sender {
+            //             // TODO: delete message
+
+            //         } else {
+            //             // TODO: this is not yours message
+            //         }
+
+            //     } else {
+            //         // TODO: message not found
+            //     }
+
+            // }
+
 
         default:
             fmt.Printf("Error, this should not happen\n")
@@ -150,6 +182,18 @@ func newPool() *redis.Pool {
             return c, err
         },
     }
+}
+
+func get_next_msg_id(client redis.Conn) (int64) {
+    next_user_id, err := client.Do("INCR", "msgid_counter")
+    if err != nil {
+        panic(err)
+    }
+    ret, ok := next_user_id.(int64)
+    if ok {
+        return ret
+    }
+    return 0
 }
 
 // server

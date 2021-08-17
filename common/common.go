@@ -10,18 +10,19 @@ import (
 // Database
 // ----------------------------------------------------------------------------------------------------
 
-type DbMessage struct {
-    MsgId int
-    Sender string
-    Text string
-}
-
 // ----------------------------------------------------------------------------------------------------
 // Request and response
 // ----------------------------------------------------------------------------------------------------
 
 const F_SEND_MESSAGE = "send_msg"
 const F_GET_UPDATES  = "get_updates"
+const F_DEL_MESSAGE  = "del_msg"
+
+type Message struct {
+    MsgId int64
+    Sender string
+    Text string
+}
 
 type Request struct {
     Function string
@@ -144,11 +145,9 @@ func ParseSendMessageResponse(b []byte) (data SendMessageResponse) {
 // ----------------------------------------------------------------------------------------------------
 
 type GetUpdatesRequest struct {
-    // Sender string
-    // Text string
 }
 
-type GetUpdatesResponse []DbMessage
+type GetUpdatesResponse []Message
 
 func BuildGetUpdatesRequest() (b []byte) {
     b, err := json.Marshal(nil)
@@ -163,7 +162,7 @@ func BuildGetUpdatesRequest() (b []byte) {
 
 // func ParseGetUpdatesRequest() is not required
 
-func BuildGetUpdatesResponse(dbMsgList []DbMessage) (b []byte) {
+func BuildGetUpdatesResponse(dbMsgList []Message) (b []byte) {
     // data := dbMsgList
     b, err := json.Marshal(dbMsgList)
     if err != nil {
@@ -179,6 +178,68 @@ func ParseGetUpdatesResponse(b []byte) (data GetUpdatesResponse) {
     err := json.Unmarshal(b, &data)
     if err != nil {
         fmt.Println("Error in ParseendMessageResponse() while unmarshaling data")
+        fmt.Println(err)
+    }
+    return
+}
+
+// ----------------------------------------------------------------------------------------------------
+// Function delete message
+// ----------------------------------------------------------------------------------------------------
+type DeleteMessageRequest struct {
+    Sender string
+    MsgId int
+}
+
+type DeleteMessageResponse struct {
+    Ok bool
+    Error string
+}
+
+func BuildDeleteMessageRequest(sender string, msgid int) (b []byte) {
+    data := DeleteMessageRequest {
+        Sender: sender,
+        MsgId: msgid,
+    }
+
+    b, err := json.Marshal(data)
+    if err != nil {
+        fmt.Println("Error in BuildDeleteMessageRequest() while marshaling data")
+        fmt.Println(err)
+    }
+
+    b = BuildRequest(F_DEL_MESSAGE, b)
+    return
+}
+
+func ParseDeleteMessageRequest(b []byte) (data DeleteMessageRequest) {
+    err := json.Unmarshal(b, &data)
+    if err != nil {
+        fmt.Println("Error in ParseDeleteMessageRequest() while unmarshaling data")
+        fmt.Println(err)
+    }
+    return
+}
+
+func BuildDeleteMessageResponse(ok bool, error string) (b []byte) {
+    data := DeleteMessageResponse {
+        Ok: ok,
+        Error: error,
+    }
+    b, err := json.Marshal(data)
+    if err != nil {
+        fmt.Println("Error in BuildDeleteMessageResponse() while marshaling data")
+        fmt.Println(err)
+    }
+
+    b = BuildResponse(b)
+    return
+}
+
+func ParseDeleteMessageResponse(b []byte) (data DeleteMessageResponse) {
+    err := json.Unmarshal(b, &data)
+    if err != nil {
+        fmt.Println("Error in ParseDeleteMessageResponse() while unmarshaling data")
         fmt.Println(err)
     }
     return

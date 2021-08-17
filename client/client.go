@@ -7,6 +7,8 @@ import (
     // "encoding/json"
     "chatroom/common"
     "time"
+    // "strings"
+    // "strconv"
 )
 
 // Note:
@@ -23,9 +25,28 @@ func main() {
     for {
         msg := read_msg(username)
         
+        // if msg[0:1] == "d" {
+            // fmt.Printf("delete msg, msg = [%v]\n", msg)
+            // l := strings.Split(msg, " ")
+            // msgid, err := strconv.Atoi(l[2])
+            // if err == nil {
+            //     req := common.BuildDeleteMessageRequest(username, msgid)
+            //     sync_with_server(req)
+            // }
+            // b := common.ParseResponse(buf[:n])
+            // data := common.ParseSendMessageResponse(b)
+            // if data.Ok {
+            //     fmt.Printf("Message with id %d was successfully deleted.\n")
+            // } else {
+            //     fmt.Printf("Error while deleting message with id %d:\n")
+            //     fmt.Printf("%s\n", data.Error)
+            // }
+        // } else {
         // Send message
         req := common.BuildSendMessageRequest(username, msg)
         sync_with_server(req)
+            
+        // }
     }
 }
 
