@@ -10,10 +10,6 @@ import (
 
 const MSG_HISTORY_LEN = 5
 
-// message id counter
-// TODO: use redis key instead of the global variable
-var msg_id_ctr = 0
-
 // database
 var pool = newPool()
 
@@ -24,16 +20,7 @@ func main() {
 
     client := pool.Get()
     defer client.Close()
-
-    _, err := client.Do("DEL", "messages")
-    if err != nil {
-        panic(err)
-    }
-
-    _, err = client.Do("SET", "msgid_counter", 0)
-    if err != nil {
-        panic(err)
-    }
+    db_clenup(client)
 
     // _, err := client.Do("SET", "mykey", "Hello from redigo!")
     // if err != nil {
@@ -90,25 +77,45 @@ func main() {
             data := common.ParseSendMessageRequest(b)
             // fmt.Printf("data.Sender = %v\n", data.Sender)
             // fmt.Printf("data.Text = %v\n", data.Text)
-            db_message := common.Message{
+            message := common.Message{
                 MsgId: get_next_msg_id(client),
                 Sender: data.Sender,
                 Text: data.Text,
             }
 
-            marshalled_msg, err := json.Marshal(db_message) 
+            marshalled_msg, err := json.Marshal(message) 
             if err != nil {
                 fmt.Println("Failed to marshall a message before writing to database")
                 fmt.Println(err)
             }
 
-            _, err = client.Do("RPUSH", "messages", marshalled_msg)
+            // Add message IDs and message data
+            _, err = client.Do("RPUSH", "msg_ids", message.MsgId)
+            if err != nil {
+                panic(err)
+            }
+
+            hash_key := get_hash_key_by_msg_id(message.MsgId)
+            _, err = client.Do("HSET", hash_key, "data", marshalled_msg) // TODO: replace marshalling by HMSETing the data items separately (?)
             if err != nil {
                 panic(err)
             }
 
             // Limit history capacity
-            _, err = client.Do("LTRIM", "messages", -MSG_HISTORY_LEN, -1)
+            int64s, err := redis.Int64s(client.Do("LRANGE", "msg_ids", 0, -MSG_HISTORY_LEN - 1))
+            if err != nil {
+                panic(err)
+            }
+
+            for _, msg_id := range(int64s) {
+                hash_key := get_hash_key_by_msg_id(msg_id)
+                _, err = client.Do("DEL", hash_key)
+                if err != nil {
+                    panic(err)
+                }
+            }
+
+            _, err = client.Do("LTRIM", "msg_ids", -MSG_HISTORY_LEN, -1)
             if err != nil {
                 panic(err)
             }
@@ -118,12 +125,23 @@ func main() {
             go sendResponse(ser, remoteaddr, resp)
         case common.F_GET_UPDATES:
 
-            messages, _ := redis.ByteSlices(client.Do("LRANGE", "messages", 0, -1))
+            int64s, err := redis.Int64s(client.Do("LRANGE", "msg_ids", 0, -1))
+            if err != nil {
+                panic(err)
+            }
 
             var resp_data common.GetUpdatesResponse
-            for _, v := range messages {
+            for _, msg_id := range(int64s) {
+                // fmt.Printf("msg_id = [%d]\n", msg_id)
+                // fmt.Printf("msg_id format [%T]\n", msg_id)
+                hash_key := fmt.Sprintf("msg_data:%d", msg_id)
+                marshalled_msg, err := redis.Bytes(client.Do("HGET", hash_key, "data"))
+                if err != nil {
+                    panic(err)
+                }
+
                 var m common.Message
-                err := json.Unmarshal(v, &m)
+                err = json.Unmarshal(marshalled_msg, &m)
                 if err != nil {
                     fmt.Println(err)
                 }
@@ -194,6 +212,37 @@ func get_next_msg_id(client redis.Conn) (int64) {
         return ret
     }
     return 0
+}
+
+func db_clenup(client redis.Conn) {
+    keys, err := redis.Strings(client.Do("KEYS", "msg_data:*"))
+    if err != nil {
+        panic(err)
+    }
+
+    for _, key := range keys {
+        _, err = client.Do("DEL", key)
+        if err != nil {
+            panic(err)
+        }
+        // fmt.Printf("deleting key = [%s]\n", key)
+    }
+
+
+    _, err = client.Do("DEL", "msg_ids")
+    if err != nil {
+        panic(err)
+    }
+
+    _, err = client.Do("SET", "msgid_counter", 0)
+    if err != nil {
+        panic(err)
+    }
+}
+
+func get_hash_key_by_msg_id(msg_id int64) (hash_key string) {
+    hash_key = fmt.Sprintf("msg_data:%d", msg_id)
+    return
 }
 
 // server
