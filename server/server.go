@@ -129,35 +129,49 @@ func main() {
             resp := common.BuildGetUpdatesResponse(resp_data)
             go sendResponse(ser, remoteaddr, resp)
 
-        // case common.F_DEL_MESSAGE:
-            // req_data := common.ParseDeleteMessageRequest(b)
+        case common.F_DEL_MESSAGE:
+            req_data := common.ParseDeleteMessageRequest(b)
 
+            hash_key := get_hash_key_by_msg_id(req_data.MsgId)
 
-            // messages, _ := redis.ByteSlices(client.Do("LRANGE", "messages", 0, -1))
+            key_exists, err := redis.Int(client.Do("EXISTS", hash_key))
+            if err != nil {
+                panic(err)
+            }
 
-            // // var resp_data common.GetUpdatesResponse
-            // for idx, v := range messages {
-            //     var m common.Message
-            //     err := json.Unmarshal(v, &m)
-            //     if err != nil {
-            //         fmt.Println(err)
-            //     }
-            //     // resp_data = append(resp_data, m)
-            //     if m.MsgId == req_data.MsgId {
-            //         if m.Sender == req_data.Sender {
-            //             // TODO: delete message
+            var resp_data common.DeleteMessageResponse
+            if key_exists == 0 {
+                resp_data.Ok = false
+                resp_data.Error = fmt.Sprintf("There is no message with ID [%v]", req_data.MsgId)
+            } else {
+                Sender, err := redis.String(client.Do("HGET", hash_key, "Sender"))
+                if err != nil {
+                    panic(err)
+                }
+                if Sender == req_data.Sender {
+                    count, err := redis.Int(client.Do("LREM", "msg_ids", 0, req_data.MsgId))
+                    if err != nil {
+                        panic(err)
+                    }
+                    _, err = client.Do("DEL", hash_key)
+                    if count == 1 {
+                        resp_data.Ok = true
+                        // resp_data.Error = fmt.Sprintf("Message with ID [%v]", req_data.MsgId)
+                        resp_data.Error = ""
+                    } else {
+                        resp_data.Ok = false
+                        resp_data.Error = fmt.Sprintf("Unexpected error while delering message with ID [%v]", req_data.MsgId)
+                    }
+                } else {
+                    resp_data.Ok = false
+                    resp_data.Error = fmt.Sprintf("It is forbidden to delete message with ID [%v], since it is not yours", req_data.MsgId)
+                }
+            }
+            
+            
 
-            //         } else {
-            //             // TODO: this is not yours message
-            //         }
-
-            //     } else {
-            //         // TODO: message not found
-            //     }
-
-            // }
-
-
+            resp := common.BuildDeleteMessageResponse(resp_data)
+            go sendResponse(ser, remoteaddr, resp)
         default:
             fmt.Printf("Error, this should not happen\n")
         }

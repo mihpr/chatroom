@@ -8,7 +8,7 @@ import (
     "chatroom/common"
     "time"
     // "strings"
-    // "strconv"
+    "strconv"
 )
 
 // Note:
@@ -24,29 +24,34 @@ func main() {
 
     for {
         msg := read_msg(username)
-        
-        // if msg[0:1] == "d" {
-            // fmt.Printf("delete msg, msg = [%v]\n", msg)
-            // l := strings.Split(msg, " ")
-            // msgid, err := strconv.Atoi(l[2])
-            // if err == nil {
-            //     req := common.BuildDeleteMessageRequest(username, msgid)
-            //     sync_with_server(req)
-            // }
-            // b := common.ParseResponse(buf[:n])
-            // data := common.ParseSendMessageResponse(b)
-            // if data.Ok {
-            //     fmt.Printf("Message with id %d was successfully deleted.\n")
-            // } else {
-            //     fmt.Printf("Error while deleting message with id %d:\n")
-            //     fmt.Printf("%s\n", data.Error)
-            // }
-        // } else {
-        // Send message
-        req := common.BuildSendMessageRequest(username, msg)
-        sync_with_server(req)
-            
-        // }
+        if msg == "del" {
+
+            reader := bufio.NewReader(os.Stdin)
+            fmt.Println("Enter message id to delete:")
+            fmt.Print("-> ")
+            s, _ := reader.ReadString('\n')
+            s = s[:len(s)-1] // remove the new line
+
+            msg_id, err := strconv.ParseInt(s, 10, 64)
+            if err != nil {
+                fmt.Printf("Problem while interpreting MsgId: %v\n", err)
+            } else {
+                req := common.BuildDeleteMessageRequest(username, msg_id)
+                n, buf := sync_with_server(req)
+                
+                b := common.ParseResponse(buf[:n])
+                data := common.ParseDeleteMessageResponse(b)
+                if data.Ok {
+                    fmt.Printf("Message with id %d was successfully deleted.\n", msg_id)
+                } else {
+                    fmt.Printf("%v\n", data.Error)
+                }
+            }
+        } else {
+            // Send message
+            req := common.BuildSendMessageRequest(username, msg)
+            sync_with_server(req)
+        }
     }
 }
 
